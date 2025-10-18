@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LlaMaps Phone Companion</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: white;
+        }
+        
+        .container {
+            max-width: 400px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+            font-weight: 300;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .status.connected {
+            background: rgba(76, 175, 80, 0.3);
+            border: 1px solid rgba(76, 175, 80, 0.5);
+        }
+        
+        .status.disconnected {
+            background: rgba(244, 67, 54, 0.3);
+            border: 1px solid rgba(244, 67, 54, 0.5);
+        }
+        
+        .status.waiting {
+            background: rgba(255, 193, 7, 0.3);
+            border: 1px solid rgba(255, 193, 7, 0.5);
+        }
+        
+        .location-info {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .location-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .label {
+            font-weight: 500;
+            opacity: 0.8;
+        }
+        
+        .value {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        
+        .button {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .server-input {
+            width: 100%;
+            padding: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+        
+        .server-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .server-input option {
+            background: #333;
+            color: white;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            opacity: 0.7;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🦙 LlaMaps</h1>
+        <p style="text-align: center; opacity: 0.8; margin-bottom: 30px;">Phone GPS Companion for Meta Quest</p>
+        
+        <div id="status" class="status waiting">
+            Waiting for GPS permission...
+        </div>
+        
+        <div class="location-info">
+            <div class="location-row">
+                <span class="label">Latitude:</span>
+                <span class="value" id="latitude">--</span>
+            </div>
+            <div class="location-row">
+                <span class="label">Longitude:</span>
+                <span class="value" id="longitude">--</span>
+            </div>
+            <div class="location-row">
+                <span class="label">Accuracy:</span>
+                <span class="value" id="accuracy">--</span>
+            </div>
+            <div class="location-row">
+                <span class="label">Last Update:</span>
+                <span class="value" id="lastUpdate">--</span>
+            </div>
+            <div class="location-row">
+                <span class="label">Updates Sent:</span>
+                <span class="value" id="updateCount">0</span>
+            </div>
+        </div>
+        
+        <input type="text" id="serverUrl" class="server-input" 
+               placeholder="Backend Server URL (e.g., http://192.168.1.100:8000)"
+               value="http://localhost:8000">
+        
+        <button id="startBtn" class="button" onclick="startLocationSharing()">
+            Start Location Sharing
+        </button>
+        
+        <button id="stopBtn" class="button" onclick="stopLocationSharing()" style="display: none;">
+            Stop Location Sharing
+        </button>
+        
+        <div class="footer">
+            Make sure your Quest and phone are on the same network
+        </div>
+    </div>
+
+    <script>
+        let watchId = null;
+        let updateCount = 0;
+        let serverUrl = 'http://localhost:8000';
+        let currentLocation = null;
+        
+        const statusEl = document.getElementById('status');
+        const latEl = document.getElementById('latitude');
+        const lngEl = document.getElementById('longitude');
+        const accuracyEl = document.getElementById('accuracy');
+        const lastUpdateEl = document.getElementById('lastUpdate');
+        const updateCountEl = document.getElementById('updateCount');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const serverUrlInput = document.getElementById('serverUrl');
+        
+        function updateStatus(message, type = 'waiting') {
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+        
+        async function startLocationSharing() {
+            serverUrl = serverUrlInput.value || 'http://localhost:8000';
+            
+            if (!navigator.geolocation) {
+                updateStatus('Geolocation not supported', 'disconnected');
+                return;
+            }
+            
+            // Check if we already have permission
+            if ('permissions' in navigator) {
+                const permission = await navigator.permissions.query({name: 'geolocation'});
+                
+                if (permission.state === 'denied') {
+                    updateStatus('Location permission denied. Please enable in browser settings.', 'disconnected');
+                    return;
+                } else if (permission.state === 'granted') {
+                    updateStatus('Starting location sharing...', 'waiting');
+                } else {
+                    updateStatus('Requesting GPS permission...', 'waiting');
+                }
+            } else {
+                updateStatus('Starting location sharing...', 'waiting');
+            }
+            
+            // Start getting location with controlled interval
+            startLocationUpdates();
+            
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'block';
+            serverUrlInput.disabled = true;
+        }
+        
+        function startLocationUpdates() {
+            const options = {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 1000  // Allow cached position up to 1 second old
+            };
+            
+            // Use watchPosition for continuous location tracking
+            watchId = navigator.geolocation.watchPosition(
+                onLocationSuccess,
+                onLocationError,
+                options
+            );
+        }
+        
+        function stopLocationSharing() {
+            if (watchId) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            
+            updateStatus('Location sharing stopped', 'disconnected');
+            
+            startBtn.style.display = 'block';
+            stopBtn.style.display = 'none';
+            serverUrlInput.disabled = false;
+        }
+        
+        function onLocationSuccess(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const accuracy = position.coords.accuracy;
+            
+            currentLocation = { lat, lng, accuracy };
+            
+            // Update UI
+            latEl.textContent = lat.toFixed(6);
+            lngEl.textContent = lng.toFixed(6);
+            accuracyEl.textContent = `±${accuracy.toFixed(0)}m`;
+            lastUpdateEl.textContent = new Date().toLocaleTimeString();
+            
+            // Send to backend
+            sendLocationUpdate(lat, lng, accuracy);
+            
+            updateStatus('Location sharing active', 'connected');
+        }
+        
+        function onLocationError(error) {
+            let message = 'Location error: ';
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    message = 'Location permission denied. Please enable location access in your browser settings and refresh the page.';
+                    startBtn.textContent = 'Permission Denied';
+                    startBtn.disabled = true;
+                    stopLocationSharing();
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message += 'Position unavailable. Please check your GPS settings.';
+                    break;
+                case error.TIMEOUT:
+                    message += 'GPS timeout. Trying again...';
+                    // Don't disable the button for timeouts
+                    break;
+                default:
+                    message += 'Unknown error occurred';
+                    break;
+            }
+            
+            updateStatus(message, 'disconnected');
+        }
+        
+        async function sendLocationUpdate(lat, lng, accuracy) {
+            try {
+                const response = await fetch(`${serverUrl}/api/location`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        latitude: lat,
+                        longitude: lng,
+                        accuracy: accuracy,
+                        timestamp: Date.now()
+                    })
+                });
+
+                if (response.ok) {
+                    updateCount++;
+                    updateCountEl.textContent = updateCount;
+                } else {
+                    console.error('Failed to send location update');
+                    updateStatus('Server connection failed', 'disconnected');
+                }
+                
+            } catch (error) {
+                console.error('Error sending location update:', error);
+                updateStatus('Server connection failed', 'disconnected');
+            }
+        }
+        
+        // Auto-detect local IP for convenience
+        function detectLocalIP() {
+            const url = window.location.href;
+            if (url.includes('localhost') || url.includes('127.0.0.1')) {
+                serverUrlInput.placeholder = 'Enter your computer\'s local IP (e.g., http://192.168.1.100:8000)';
+            }
+        }
+        
+        // Check permission status on load
+        async function checkInitialPermission() {
+            if ('permissions' in navigator) {
+                try {
+                    const permission = await navigator.permissions.query({name: 'geolocation'});
+                    
+                    if (permission.state === 'granted') {
+                        updateStatus('Location permission granted. Ready to share location.', 'connected');
+                        startBtn.textContent = 'Start Location Sharing';
+                    } else if (permission.state === 'denied') {
+                        updateStatus('Location permission denied. Please enable in browser settings.', 'disconnected');
+                        startBtn.textContent = 'Permission Denied';
+                        startBtn.disabled = true;
+                    } else {
+                        updateStatus('Click to request location permission', 'waiting');
+                        startBtn.textContent = 'Request Location Permission';
+                    }
+                    
+                    // Listen for permission changes
+                    permission.onchange = function() {
+                        if (this.state === 'granted') {
+                            updateStatus('Location permission granted. Ready to share location.', 'connected');
+                            startBtn.textContent = 'Start Location Sharing';
+                            startBtn.disabled = false;
+                        } else if (this.state === 'denied') {
+                            updateStatus('Location permission denied. Please enable in browser settings.', 'disconnected');
+                            startBtn.textContent = 'Permission Denied';
+                            startBtn.disabled = true;
+                            stopLocationSharing();
+                        }
+                    };
+                } catch (error) {
+                    console.log('Permission API not fully supported');
+                    updateStatus('Click to start location sharing', 'waiting');
+                }
+            }
+        }
+        
+        // Initialize
+        detectLocalIP();
+        checkInitialPermission();
+        
+        // Handle beforeunload to stop location sharing
+        window.addEventListener('beforeunload', stopLocationSharing);
+    </script>
+</body>
+</html>
